@@ -2,15 +2,14 @@
 
 Exposes three tools over stdio transport:
   - search_policy: semantic search over the policy corpus
-  - lookup_order:  read order + refund state from SQLite
-  - issue_refund:  write a refund row, guarded by business rules
+  - lookup_order:  read order state from SQLite or the Razorpay payments lab
+  - issue_refund:  issue a full refund via the Razorpay payments lab
 """
 
 import os
 import sqlite3
-import uuid
-from datetime import datetime, timezone
 
+import httpx
 from mcp.server.fastmcp import FastMCP
 
 from rag import search as rag_search
@@ -21,11 +20,13 @@ from rag import search as rag_search
 
 BASE_DIR = os.path.dirname(__file__)
 DB_PATH = os.path.join(BASE_DIR, "db", "payments.db")
-REFUND_WINDOW_DAYS = 30
+RAZORPAY_LAB_URL = os.environ.get("RAZORPAY_LAB_URL", "http://localhost:3000")
+USE_RAZORPAY_LAB = os.environ.get("USE_RAZORPAY_LAB", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
-# SQLite helpers
+# SQLite helpers (used when USE_RAZORPAY_LAB is false)
 # ---------------------------------------------------------------------------
+
 
 def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -66,18 +67,33 @@ def search_policy(query: str) -> list[dict]:
     name="lookup_order",
     description=(
         "Look up an order by its ID. Returns the order details (amount, status, "
-        "customer, created date) and any existing refunds against that order."
+        "created date) and any existing refunds against that order."
     ),
 )
 def lookup_order(order_id: str) -> dict:
-    """Retrieve order and refund state from the database.
+    """Retrieve order and refund state.
 
     Args:
-        order_id: The order identifier (e.g. 'ORD-001').
+        order_id: The order identifier (e.g. 'ORD-001' or 'order_xxx').
     """
+    if USE_RAZORPAY_LAB:
+        resp = httpx.get(f"{RAZORPAY_LAB_URL}/orders/{order_id}")
+        data = resp.json()
+        if resp.status_code != 200:
+            return {"error": data.get("error", resp.text)}
+        return {
+            "order_id": data["id"],
+            "amount": data["amount"],
+            "status": data["status"],
+            "created_at": data["created_at"],
+            "refunds": [],
+        }
+
     conn = _get_db()
     try:
-        row = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM orders WHERE order_id = ?", (order_id,)
+        ).fetchone()
         if not row:
             return {"error": f"Order {order_id} not found."}
 
@@ -97,88 +113,22 @@ def lookup_order(order_id: str) -> dict:
 @mcp.tool(
     name="issue_refund",
     description=(
-        "Issue a refund for an order. Enforces business rules: the order must exist, "
-        "must be in a refundable status, must be within the refund window, must not "
-        "already have a refund, and the refund amount must not exceed the order amount."
+        "Issue a full refund for an order. Partial amounts are not supported. "
+        "The order must be in PAID status with an associated payment. "
+        "Refund confirmation arrives asynchronously via webhook."
     ),
 )
-def issue_refund(order_id: str, amount: float) -> dict:
-    """Issue a refund against an order, subject to guard rules.
+def issue_refund(order_id: str) -> dict:
+    """Issue a full refund via the payments lab.
 
     Args:
-        order_id: The order identifier to refund.
-        amount: The refund amount (must be > 0 and <= order amount).
+        order_id: The Razorpay order identifier to refund.
     """
-    conn = _get_db()
-    try:
-        row = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
-        if not row:
-            return {"error": f"Order {order_id} not found."}
-
-        order = dict(row)
-
-        # Guard 1: status must allow refunds
-        if order["status"] not in ("COMPLETED", "CANCELLED"):
-            return {
-                "error": f"Order {order_id} is in {order['status']} status and is not eligible for a refund."
-            }
-
-        # Guard 2: refund window
-        created = datetime.fromisoformat(order["created_at"])
-        if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
-        age_days = (datetime.now(timezone.utc) - created).days
-        if age_days > REFUND_WINDOW_DAYS:
-            return {
-                "error": (
-                    f"Order {order_id} was placed {age_days} days ago, "
-                    f"outside the {REFUND_WINDOW_DAYS}-day refund window."
-                )
-            }
-
-        # Guard 3: no existing refund
-        existing = conn.execute(
-            "SELECT refund_id, amount FROM refunds WHERE order_id = ?", (order_id,)
-        ).fetchone()
-        if existing:
-            return {
-                "error": (
-                    f"Order {order_id} already has a refund "
-                    f"(ref: {existing['refund_id']}, amount: {existing['amount']}). "
-                    f"No second refund allowed."
-                )
-            }
-
-        # Guard 4: amount validation
-        if amount <= 0:
-            return {"error": "Refund amount must be greater than zero."}
-        if amount > order["amount"]:
-            return {
-                "error": (
-                    f"Refund amount {amount} exceeds order amount {order['amount']}. "
-                    f"Refunds cannot exceed the original order amount."
-                )
-            }
-
-        # All guards passed — issue the refund
-        refund_id = f"REF-{uuid.uuid4().hex[:8].upper()}"
-        now = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            "INSERT INTO refunds (refund_id, order_id, amount, status, created_at) VALUES (?, ?, ?, ?, ?)",
-            (refund_id, order_id, amount, "COMPLETED", now),
-        )
-        conn.commit()
-
-        return {
-            "success": True,
-            "refund_id": refund_id,
-            "order_id": order_id,
-            "amount": amount,
-            "status": "COMPLETED",
-            "created_at": now,
-        }
-    finally:
-        conn.close()
+    resp = httpx.post(f"{RAZORPAY_LAB_URL}/refund/{order_id}")
+    data = resp.json()
+    if resp.status_code != 200:
+        return {"error": data.get("error", resp.text)}
+    return data
 
 
 # ---------------------------------------------------------------------------

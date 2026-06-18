@@ -164,3 +164,6 @@ This is the non-obvious insight that a happy-path demo would never surface.
 - Generalization to other models. These findings are Sonnet-specific. A different model may hallucinate arguments, fail to self-correct on retrieval, or sequence tool calls differently.
 
 The honest position this demo underwrites: *"I built this end to end, ran it against a deliberate failure matrix, and I understand where and why each component breaks — and more importantly, I understand that the failure surface is in system design, not model capability."*
+
+First — the async confirmation gap is real and observable, not theoretical. The agent correctly issued the refund, correctly reported it as pending, and correctly explained why the status hadn't updated yet. That's the right behavior. But notice: the agent has no mechanism to proactively notify the user when the webhook arrives. The user has to ask again. In production, you'd want a notification path.
+Second — the 1-second delay is too short to catch webhook delivery. Razorpay took 4-5 seconds. In a real system with network latency, retries, and load — webhook delivery could be minutes. An agent that checks status 1 second after initiating will almost always show stale data. The status check window needs to be configurable or the agent needs to explicitly say "check back in 30 seconds."
