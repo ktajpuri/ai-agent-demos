@@ -58,7 +58,7 @@ You could expose the same three functions directly via the Anthropic tool-use AP
 ### RAG Layer
 - ~12 hand-written policy documents covering: refund windows, partial refund rules, already-refunded orders, fraud escalation, dispute handling, expired windows
 - **In-memory vector store** (cosine similarity over numpy arrays) — at this corpus size, a dedicated vector DB (Pinecone, Weaviate, etc.) adds infrastructure complexity without adding learning. The retrieval mechanics are identical; the scale is not.
-- **Real embeddings** — using a real embedding API (OpenAI `text-embedding-3-small` or equivalent). Fake/random embeddings would make retrieval meaningless and eliminate the failure scenarios we're here to study.
+- **Real embeddings** — using a real embedding API ( `voyage-3-lite` or equivalent). Fake/random embeddings would make retrieval meaningless and eliminate the failure scenarios we're here to study.
 
 ### Python Host
 - Thin: calls Anthropic API, parses `tool_use` blocks, routes to MCP server, feeds `tool_result` blocks back into the next turn
@@ -122,7 +122,7 @@ At that point: stop. Do not add a UI. Do not add a fourth tool. Do not add a vec
 | MCP transport | stdio | Simplest; no HTTP server complexity |
 | MCP SDK | `mcp` (Python) | Official SDK — version pinned at build time |
 | Vector store | numpy (in-memory cosine) | Right-sized for 12 documents |
-| Embeddings | OpenAI `text-embedding-3-small` | Small, cheap, real |
+| Embeddings | Voyage AI `voyage-3-lite` | Free tier, Anthropic-invested, no OpenAI dependency |
 | Database | SQLite (stdlib) | No infrastructure; same schema as Razorpay lab |
 
 ---
