@@ -1,0 +1,577 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Policy-Aware Support Agent — System Design Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ink:#17191f;
+    --paper:#fafaf7;
+    --slate:#5b6472;
+    --slate-soft:#8a909c;
+    --rule:#e6e3dc;
+    --wash:#f3f1ea;
+    --signal:#b42318;
+    --signal-deep:#7a160f;
+    --signal-wash:#fcefed;
+    --signal-rule:#ecc9c4;
+    --display:'Space Grotesk',"Helvetica Neue",Arial,sans-serif;
+    --body:'Source Serif 4',Georgia,'Times New Roman',serif;
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --measure:46rem;
+    --wide:64rem;
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--body);
+    font-size:18px;
+    line-height:1.72;
+    font-feature-settings:"kern" 1,"liga" 1;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---- layout shell ---- */
+  .shell{display:grid;grid-template-columns:1fr;max-width:var(--wide);margin:0 auto;padding:0 7vw 8rem}
+  @media(min-width:1100px){
+    .shell{grid-template-columns:15rem minmax(0,1fr);column-gap:3.5rem;padding:0 4rem 8rem}
+  }
+
+  /* ---- masthead ---- */
+  .masthead{grid-column:1/-1;padding:5.5rem 0 2.2rem;border-bottom:1px solid var(--ink);margin-bottom:3.5rem}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--slate);margin:0 0 1.4rem}
+  .masthead h1{
+    font-family:var(--display);font-weight:600;font-size:clamp(2.1rem,5.2vw,3.4rem);
+    line-height:1.04;letter-spacing:-.02em;margin:0 0 1.1rem;max-width:18ch
+  }
+  .masthead .lede{font-size:1.18rem;color:var(--ink);max-width:42rem;margin:0 0 2rem;line-height:1.6}
+  .masthead .lede em{font-style:italic;color:var(--signal-deep)}
+  .meta-row{display:flex;flex-wrap:wrap;gap:1.4rem 2.4rem;align-items:baseline;font-family:var(--mono);font-size:.76rem;letter-spacing:.04em;color:var(--slate)}
+  .meta-row a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+  .meta-row a:hover{border-color:var(--ink)}
+  .tag{display:inline-flex;align-items:center;gap:.5ch;padding:.28rem .6rem;border:1px solid var(--rule);border-radius:2px;background:var(--wash);text-transform:uppercase;letter-spacing:.14em;font-size:.68rem}
+  .legend{display:inline-flex;align-items:center;gap:.6ch}
+  .legend .dot{width:.62rem;height:.62rem;border-radius:50%;background:var(--signal);display:inline-block}
+
+  /* ---- side nav ---- */
+  .rail{display:none}
+  @media(min-width:1100px){
+    .rail{display:block;position:sticky;top:2.5rem;align-self:start;height:max-content;padding-top:.3rem}
+    .rail .rail-h{font-family:var(--mono);font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;color:var(--slate-soft);margin:0 0 1rem}
+    .rail ol{list-style:none;margin:0;padding:0}
+    .rail li{margin:0}
+    .rail a{display:grid;grid-template-columns:1.8rem 1fr;gap:.4rem;align-items:baseline;
+      font-family:var(--mono);font-size:.78rem;line-height:1.35;color:var(--slate);text-decoration:none;
+      padding:.34rem 0;border-left:2px solid transparent;padding-left:.7rem;margin-left:-.7rem;transition:color .18s,border-color .18s}
+    .rail a .n{color:var(--slate-soft)}
+    .rail a:hover{color:var(--ink)}
+    .rail a.active{color:var(--ink);border-color:var(--signal)}
+    .rail a.active .n{color:var(--signal)}
+  }
+
+  /* ---- content column ---- */
+  .content{min-width:0}
+  section{margin:0 0 4.2rem;scroll-margin-top:2rem}
+  .sec-head{display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:baseline;margin:0 0 1.4rem;border-top:1px solid var(--rule);padding-top:1.5rem}
+  .sec-num{font-family:var(--mono);font-size:.95rem;color:var(--signal);font-weight:500;letter-spacing:.02em}
+  .sec-head h2{font-family:var(--display);font-weight:600;font-size:clamp(1.4rem,3vw,1.85rem);line-height:1.12;letter-spacing:-.015em;margin:0;max-width:24ch}
+  h3{font-family:var(--display);font-weight:600;font-size:1.08rem;letter-spacing:-.005em;margin:2.4rem 0 .7rem;max-width:var(--measure)}
+  h4{font-family:var(--mono);font-weight:600;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;color:var(--slate);margin:1.8rem 0 .6rem}
+  p{max-width:var(--measure);margin:0 0 1.1rem}
+  .content a{color:var(--signal-deep);text-decoration:none;border-bottom:1px solid var(--signal-rule)}
+  strong{font-weight:600}
+  em{font-style:italic}
+  code{font-family:var(--mono);font-size:.86em;background:var(--wash);padding:.08em .4em;border-radius:3px;border:1px solid var(--rule)}
+  ol,ul{max-width:var(--measure);padding-left:1.3rem;margin:0 0 1.2rem}
+  li{margin:0 0 .5rem}
+
+  /* signal text — money/danger inline */
+  .danger{color:var(--signal-deep);font-weight:600}
+
+  /* ---- callouts ---- */
+  .callout{max-width:var(--measure);margin:1.6rem 0;padding:1.3rem 1.5rem;background:var(--wash);border-radius:4px;border-left:3px solid var(--slate)}
+  .callout .k{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--slate);display:block;margin-bottom:.5rem}
+  .callout p{margin:0;max-width:none}
+  .callout.thesis{background:#fff;border:1px solid var(--ink);border-left:3px solid var(--ink)}
+  .callout.thesis .k{color:var(--ink)}
+  .callout.money{background:var(--signal-wash);border-left-color:var(--signal);border-top:1px solid var(--signal-rule);border-right:1px solid var(--signal-rule);border-bottom:1px solid var(--signal-rule)}
+  .callout.money .k{color:var(--signal)}
+  .callout.open{border-left-color:var(--slate-soft);border-style:dashed;border-width:1px 1px 1px 3px;border-color:var(--rule) var(--rule) var(--rule) var(--slate-soft);background:#fff}
+  .callout.open .k{color:var(--slate)}
+
+  /* ---- tables ---- */
+  .tablewrap{max-width:var(--wide);margin:1.6rem 0;overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:.9rem;line-height:1.5}
+  caption{caption-side:top;text-align:left;font-family:var(--mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);padding-bottom:.7rem}
+  th,td{text-align:left;padding:.62rem .85rem;border-bottom:1px solid var(--rule);vertical-align:top}
+  thead th{font-family:var(--mono);font-weight:600;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);border-bottom:1px solid var(--ink);white-space:nowrap}
+  tbody tr:last-child td{border-bottom:1px solid var(--ink)}
+  td .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  tr.money td{background:var(--signal-wash)}
+  tr.money td:first-child{box-shadow:inset 3px 0 0 var(--signal)}
+  .sev{font-family:var(--mono);font-size:.74rem;font-weight:600;white-space:nowrap}
+  .sev.p1{color:var(--signal-deep)}
+
+  /* ---- code / scale math block ---- */
+  pre.calc{max-width:var(--measure);background:var(--ink);color:#eceae3;font-family:var(--mono);font-size:.82rem;line-height:1.7;
+    padding:1.2rem 1.4rem;border-radius:5px;overflow-x:auto;margin:1.4rem 0}
+  pre.calc .hl{color:#ffb4a8}
+
+  /* ---- diagram cards ---- */
+  figure.diagram{max-width:var(--wide);margin:1.8rem 0;border:1px solid var(--rule);border-radius:6px;background:#fff;overflow:hidden}
+  figure.diagram figcaption{font-family:var(--mono);font-size:.74rem;letter-spacing:.06em;color:var(--slate);
+    padding:.8rem 1.1rem;border-bottom:1px solid var(--rule);background:var(--wash)}
+  figure.diagram figcaption b{color:var(--signal);font-weight:600;letter-spacing:.04em}
+  .mermaid{padding:1.6rem 1.1rem;text-align:center;font-family:var(--mono)!important}
+  .mermaid svg{max-width:100%;height:auto}
+
+  /* ---- pull divider for §0 ---- */
+  .headline-sec .sec-head{border-top:none;padding-top:0}
+
+  /* ---- footer ---- */
+  .endnote{grid-column:1/-1;margin-top:2rem;padding-top:1.8rem;border-top:1px solid var(--ink);
+    font-family:var(--mono);font-size:.74rem;letter-spacing:.04em;color:var(--slate);max-width:var(--measure)}
+
+  /* ---- load motion ---- */
+  @media(prefers-reduced-motion:no-preference){
+    section,.masthead{animation:rise .6s cubic-bezier(.2,.7,.3,1) both}
+    .masthead{animation-delay:.02s}
+  }
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+  /* ---- print / PDF ---- */
+  @media print{
+    @page{ margin:16mm 15mm; }
+    :root{--paper:#fff}
+    html,body{background:#fff}
+    body{font-size:10.5pt;line-height:1.55}
+    .rail,.topfade{display:none!important}
+    .shell{display:block;max-width:none;margin:0;padding:0}
+    .content{min-width:0}
+    /* release the on-screen reading-measure caps so text fills the page evenly within @page margins */
+    .masthead h1,.masthead .lede,
+    .content p,.content ol,.content ul,h3,h4,
+    .callout,.callout p,pre.calc,.endnote{max-width:none}
+    .tablewrap,figure.diagram{max-width:none}
+    section{animation:none;page-break-inside:auto;margin-bottom:1.1rem}
+    .masthead{animation:none;padding-top:0;margin-bottom:1.6rem}
+    .sec-head{page-break-after:avoid;break-after:avoid}
+    h3,h4{page-break-after:avoid;break-after:avoid}
+    figure.diagram,.tablewrap,pre.calc,.callout{page-break-inside:avoid;break-inside:avoid}
+    tr,img,svg{page-break-inside:avoid}
+    *{ -webkit-print-color-adjust:exact;print-color-adjust:exact }
+    a{color:inherit;border:none}
+  }
+</style>
+
+<div class="shell">
+
+  <header class="masthead">
+    <p class="eyebrow">System Design Review · ai-agent-demos</p>
+    <h1>Policy-Aware Support Agent</h1>
+    <p class="lede">An autonomous agent that answers policy questions and moves money. The design is organized around one honest finding: this is <em>not a throughput problem — it is a correctness and blast-radius problem.</em></p>
+    <div class="meta-row">
+      <span class="tag">Demo 01 — Agentic RAG over MCP</span>
+      <span><a href="https://github.com/ktajpuri/ai-agent-demos">github.com/ktajpuri/ai-agent-demos</a></span>
+      <span class="legend"><span class="dot"></span> Red marks the money-moving surface</span>
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Sections">
+    <p class="rail-h">Contents</p>
+    <ol>
+      <li><a href="#s0"><span class="n">00</span><span>The honest headline</span></a></li>
+      <li><a href="#s1"><span class="n">01</span><span>Requirements &amp; scale</span></a></li>
+      <li><a href="#s2"><span class="n">02</span><span>High-level architecture</span></a></li>
+      <li><a href="#s3"><span class="n">03</span><span>Component design</span></a></li>
+      <li><a href="#s4"><span class="n">04</span><span>Failures → mitigations</span></a></li>
+      <li><a href="#s5"><span class="n">05</span><span>Threat model</span></a></li>
+      <li><a href="#s6"><span class="n">06</span><span>Cost analysis</span></a></li>
+      <li><a href="#s7"><span class="n">07</span><span>Observability</span></a></li>
+      <li><a href="#s8"><span class="n">08</span><span>Tools &amp; rationale</span></a></li>
+      <li><a href="#s9"><span class="n">09</span><span>What it does not do</span></a></li>
+    </ol>
+  </nav>
+
+  <main class="content">
+
+    <!-- 0 -->
+    <section id="s0" class="headline-sec">
+      <div class="sec-head"><span class="sec-num">§00</span><h2>The honest headline</h2></div>
+      <p>This is <strong>not a throughput system.</strong> When you run the scale math in §01, average load lands around <strong>0.03 conversations/second</strong>, peaking near 0.3/s on a sale day. A single application server handles that without strain. Walking into a review talking about sharding, autoscaling, and QPS would be solving a problem this system does not have.</p>
+      <p>The problem it actually has is <span class="danger">correctness and blast radius.</span> It is an autonomous agent that <span class="danger">moves money</span> — it issues refunds via Razorpay — and makes factual policy claims to customers. Every failure worth designing against in Demo 01's nine-scenario matrix was a <strong>system-design failure, not a model-capability failure</strong>: silent retrieval misses, parallel tool calls widening blast radius, an async webhook gap that let the agent report a refund as done before it was confirmed, missing idempotency, and policy contradictions surfaced verbatim to users.</p>
+      <div class="callout thesis">
+        <span class="k">Thesis</span>
+        <p>The rate of money-moving actions and the cost of a wrong autonomous action are the real scale axes here — <strong>not requests per second.</strong> Every section below is organized around that.</p>
+      </div>
+    </section>
+
+    <!-- 1 -->
+    <section id="s1">
+      <div class="sec-head"><span class="sec-num">§01</span><h2>Requirements &amp; scale assumptions</h2></div>
+
+      <h4>Functional requirements</h4>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>#</th><th>Requirement</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td class="num">F1</td><td>Answer customer policy questions (returns, refunds, shipping, cancellation windows) grounded in a curated corpus</td><td>RAG, not parametric knowledge</td></tr>
+            <tr><td class="num">F2</td><td>Take bounded actions: check order status, initiate refund / return</td><td class="danger">Side-effecting · money movement</td></tr>
+            <tr><td class="num">F3</td><td>Escalate to a human when confidence is low or the request is out of scope</td><td>The default, not the exception</td></tr>
+            <tr><td class="num">F4</td><td>Report action status truthfully, including “in progress / pending confirmation”</td><td>Directly from Scenario 9</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Non-functional requirements — ranked by what actually matters</h4>
+      <ol>
+        <li><strong>Correctness of money-moving actions</strong> — no double refunds, no over-refunds, no ineligible refunds. The top constraint.</li>
+        <li><strong>Truthful state reporting</strong> — never claim an action succeeded before it is confirmed.</li>
+        <li><strong>Grounded answers</strong> — never answer a policy question from parametric memory when retrieval returns nothing relevant.</li>
+        <li><strong>Graceful degradation</strong> — when a tool or the payment provider fails, escalate cleanly rather than improvise.</li>
+        <li>Latency — a few seconds end-to-end is fine for support; not latency-critical.</li>
+        <li>Throughput — effectively a non-requirement at this scale (proven below).</li>
+      </ol>
+
+      <h4>Scale math — the part that deflates the premise</h4>
+      <p>Assumed profile: a mid-market Indian D2C / marketplace.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Driver</th><th>Assumption</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Orders</td><td>1,000,000 / month</td><td class="num">≈ 33,000 / day</td></tr>
+            <tr><td>Support contact rate</td><td>7% of orders generate a contact</td><td class="num">≈ 2,300 / day</td></tr>
+            <tr><td>Agent-addressable share</td><td>~50% are policy Q&amp;A + order-status + refund/return</td><td class="num">≈ 1,150 conv / day</td></tr>
+            <tr><td>Target containment</td><td>60% resolved without a human</td><td class="num">≈ 690 auto · 460 escalated</td></tr>
+            <tr class="money"><td><strong>Refund actions</strong></td><td>~25% of agent conversations trigger a refund / return</td><td class="num"><strong>≈ 290 / day</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="calc">1,150 conversations/day ÷ 10 active hours ÷ 3,600 s
+  = <span class="hl">0.032 conversations/second</span>  (average)
+
+Sale-day peak (assume 10×)        ≈ 0.32 conversations/second
+LLM calls per conversation (~4)   ≈ 1.3 model calls/second at peak</pre>
+
+      <p><strong>Peak load is ~1 QPS of model calls.</strong> Throughput is not a design problem. The number worth obsessing over is <span class="danger">~290 money-moving actions/day</span> — because the cost of getting one wrong dwarfs everything else in this system.</p>
+
+      <div class="callout open">
+        <span class="k">Open question — flag, don't paper over</span>
+        <p>The 7% contact rate and 50% addressable share are typical-but-assumed. If real ticket data shows the addressable share is far lower (mostly out-of-scope disputes), the agent's ROI weakens and a narrower scope may be the right call. Validate against the actual support-ticket taxonomy before committing.</p>
+      </div>
+    </section>
+
+    <!-- 2 -->
+    <section id="s2">
+      <div class="sec-head"><span class="sec-num">§02</span><h2>High-level architecture</h2></div>
+      <figure class="diagram">
+        <figcaption><b>Diagram 1</b> — System overview. The red path is the money-moving surface; everything in §05–§07 exists to keep it safe.</figcaption>
+        <pre class="mermaid">
+flowchart TD
+    U[Customer] --&gt;|message| H[Host / Orchestrator<br/>host.py — agentic loop]
+    H --&gt;|prompt + tool defs| LLM[Claude<br/>tool-use loop]
+    LLM --&gt;|tool calls| H
+    H --&gt;|retrieval query| R[Retrieval<br/>rag.py — Voyage embeddings]
+    R --&gt;|top-k chunks| H
+    H --&gt;|tool invocation| MCP[MCP Server<br/>mcp_server.py]
+    MCP --&gt; T1[get_order_status]
+    MCP --&gt; T2[search_policy]
+    MCP --&gt; T3[issue_refund]
+    T3 --&gt;|HTTP refund API| PAY[Payments service<br/>Node/Express + SQLite]
+    PAY --&gt;|refund API| RZP[(Razorpay)]
+    RZP -.-&gt;|async webhook| PAY
+    R -.-&gt;|reads| CORP[(Policy corpus<br/>~12 docs → curated)]
+    H --&gt;|low confidence / out of scope| ESC[Human handoff]
+
+    classDef money fill:#fcefed,stroke:#b42318,color:#7a160f,stroke-width:1.5px;
+    class T3,PAY,RZP money;
+        </pre>
+      </figure>
+    </section>
+
+    <!-- 3 -->
+    <section id="s3">
+      <div class="sec-head"><span class="sec-num">§03</span><h2>Component design</h2></div>
+
+      <h3>3.1 — Host / Orchestrator (<code>host.py</code>)</h3>
+      <p><strong>What it does:</strong> runs the explicit Anthropic tool-use loop — sends the user message plus tool definitions to Claude, executes returned tool calls, feeds results back, repeats until a final answer.</p>
+      <p><strong>Why not a framework:</strong> the explicit loop was chosen over LangGraph / CrewAI / LlamaIndex deliberately. For a system whose dominant risk is <span class="danger">blast radius of autonomous actions</span>, framework opacity is a liability — you need to see and gate every tool call. The trade-off is real: you write orchestration plumbing yourself. At this scale that's the right trade; the plumbing is small and the visibility is worth more than the saved code.</p>
+      <p><strong>Where it breaks (observed):</strong> <span class="danger">parallel tool calls increase blast radius.</span> When the model emits multiple tool calls in one turn, side-effecting ones can fire alongside reads, widening the surface for a wrong action.</p>
+      <p><strong>Mitigation:</strong> partition tools into <em>read</em> and <em>side-effecting</em>. Reads parallelize freely. Side-effecting tools are <span class="danger">serialized and gated</span> — at most one in flight, each preceded by a server-side eligibility check (§05). This is the single most important control in the system.</p>
+
+      <figure class="diagram">
+        <figcaption><b>Diagram 2</b> — Agentic loop with the side-effect gate.</figcaption>
+        <pre class="mermaid">
+sequenceDiagram
+    participant U as Customer
+    participant H as Host
+    participant C as Claude
+    participant MCP as MCP Server
+    U-&gt;&gt;H: "Refund for order #123"
+    H-&gt;&gt;C: message + tool defs
+    C--&gt;&gt;H: tool_use: search_policy
+    H-&gt;&gt;MCP: search_policy(refund eligibility)
+    MCP--&gt;&gt;H: policy chunks
+    H-&gt;&gt;C: tool_result
+    C--&gt;&gt;H: tool_use: get_order_status, issue_refund
+    Note over H: Reads parallelize.<br/>issue_refund gated:<br/>serialize + eligibility check
+    H-&gt;&gt;MCP: get_order_status(123)
+    MCP--&gt;&gt;H: delivered, eligible
+    H-&gt;&gt;H: Eligibility PASS → allow refund
+    H-&gt;&gt;MCP: issue_refund(123, amount, idem_key)
+    MCP--&gt;&gt;H: status: INITIATED (not confirmed)
+    H-&gt;&gt;C: tool_results
+    C--&gt;&gt;H: "Refund initiated, pending confirmation"
+    H--&gt;&gt;U: truthful pending status
+        </pre>
+      </figure>
+
+      <h3>3.2 — Retrieval layer (<code>rag.py</code>)</h3>
+      <p><strong>What it does:</strong> embeds the query with Voyage AI, retrieves top-k chunks from the policy corpus, hands them to the host as grounding context.</p>
+      <p><strong>Where it breaks (observed):</strong> <strong>silent retrieval misses</strong> — the query embeds, retrieval returns <em>something</em> (nearest neighbours always exist), but nothing is relevant, and the agent answers anyway from parametric knowledge. The most dangerous RAG failure because it is invisible.</p>
+      <p><strong>Mitigation:</strong> a <strong>retrieval-confidence threshold.</strong> If the top result's similarity is below a tuned floor, treat it as “no relevant policy found” → the agent must say it doesn't know and escalate, never improvise. Tune the floor against labelled in-corpus and out-of-corpus queries; accept that this trades some auto-resolution for correctness. For a system making policy claims to customers, that trade is correct.</p>
+      <div class="callout">
+        <span class="k">Honest scale note — the vector store</span>
+        <p>The corpus is ~12 docs, growing to maybe a few hundred. <strong>This does not justify a managed vector DB.</strong> In-memory or <code>pgvector</code> on the existing Postgres suffices and removes an entire piece of infrastructure. Reach for Pinecone/Qdrant only past ~10⁵–10⁶ chunks or for filtered hybrid search at scale. A vector DB here would be resume-driven architecture, not problem-driven.</p>
+      </div>
+
+      <h3>3.3 — MCP Server (<code>mcp_server.py</code>) and the three tools</h3>
+      <p>Exposes <code>get_order_status</code>, <code>search_policy</code>, <code>issue_refund</code>. The first two are reads. <span class="danger"><code>issue_refund</code> is the money-moving tool</span> and gets the eligibility gate, idempotency key, and serialization described above and in §05.</p>
+
+      <h3>3.4 — Payments path and the webhook reconciliation gap</h3>
+      <p><strong>The observed failure (Scenario 9):</strong> the agent calls <code>issue_refund</code> → Razorpay returns “initiated” → the <em>confirmed</em> status arrives asynchronously via webhook 4–5 seconds later. In between, a naive implementation would report <span class="danger">“refund successful” before it actually is.</span></p>
+      <p><strong>Mitigation — never conflate “initiated” with “confirmed”:</strong></p>
+
+      <figure class="diagram">
+        <figcaption><b>Diagram 3</b> — Refund with reconciliation. Red notes mark the dangerous states.</figcaption>
+        <pre class="mermaid">
+sequenceDiagram
+    participant H as Host/MCP
+    participant P as Payments svc
+    participant R as Razorpay
+    H-&gt;&gt;P: issue_refund(order, amount, idem_key)
+    P-&gt;&gt;P: persist record = INITIATED
+    P-&gt;&gt;R: refund API (with idempotency key)
+    R--&gt;&gt;P: 200 accepted (async)
+    P--&gt;&gt;H: status = INITIATED
+    Note over H: Agent says "pending", NOT "done"
+    R--&gt;&gt;P: webhook: refund.processed
+    P-&gt;&gt;P: reconcile record → CONFIRMED
+    Note over P: If webhook never lands,<br/>poller reconciles on a timer
+        </pre>
+      </figure>
+
+      <figure class="diagram">
+        <figcaption><b>Diagram 4</b> — Refund state machine. The poller is the backstop so silent-webhook failures don't strand a refund in INITIATED.</figcaption>
+        <pre class="mermaid">
+stateDiagram-v2
+    [*] --&gt; INITIATED: issue_refund accepted
+    INITIATED --&gt; CONFIRMED: webhook refund.processed
+    INITIATED --&gt; FAILED: webhook refund.failed
+    INITIATED --&gt; CONFIRMED: reconciliation poller (webhook missed)
+    FAILED --&gt; [*]
+    CONFIRMED --&gt; [*]
+        </pre>
+      </figure>
+      <p>Same class of bug as the silent-webhook observability defect already caught in the Razorpay lab — designed out here rather than patched after the fact.</p>
+    </section>
+
+    <!-- 4 -->
+    <section id="s4">
+      <div class="sec-head"><span class="sec-num">§04</span><h2>Observed failures → mitigations</h2></div>
+      <p>Every row traces to a <em>real</em> scenario from the nine-scenario matrix, not a generic best-practice checklist. This table is the heart of the document.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>#</th><th>Observed failure</th><th>Root cause</th><th>Mitigation</th><th>Trade-off accepted</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1</td><td>Parallel tool calls widen blast radius</td><td>Concurrent side-effecting calls</td><td>Serialize + gate side-effecting tools; reads parallelize</td><td>Slightly slower multi-action turns</td></tr>
+            <tr><td class="num">2</td><td>Silent retrieval miss → improvised policy answer</td><td>No relevance floor on retrieval</td><td>Confidence threshold → escalate on miss</td><td>Lower auto-resolution rate</td></tr>
+            <tr><td class="num">3</td><td>Policy contradictions surfaced to user</td><td>Conflicting docs in corpus</td><td>Curation + conflict detection + single source of truth</td><td>Editorial overhead on corpus</td></tr>
+            <tr><td class="num">4</td><td>Rate limits hit under burst</td><td>No backoff / queue</td><td>Exponential backoff w/ jitter + request queue</td><td>Added latency under load</td></tr>
+            <tr class="money"><td class="num">5</td><td>No idempotency on refunds</td><td>Refund API called without dedup key</td><td>Idempotency key per refund; server-side dedup</td><td>None meaningful</td></tr>
+            <tr class="money"><td class="num">6</td><td>“Refund done” reported before confirmed</td><td>Async webhook treated as sync</td><td>INITIATED vs CONFIRMED states + reconciliation poller</td><td>User sees “pending” briefly</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">
+        <span class="k">If I had one interview slide</span>
+        <p>It would be this table. It's the difference between “I built a RAG demo” and “I ran an autonomous money-moving agent and characterized its failure surface.”</p>
+      </div>
+    </section>
+
+    <!-- 5 -->
+    <section id="s5">
+      <div class="sec-head"><span class="sec-num">§05</span><h2>Threat model — money movement is the domain risk</h2></div>
+      <p>Generic LLM-security checklists are weak here. The specific risk is precise: <span class="danger">an autonomous agent that can move money, driven by untrusted user text.</span></p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Threat</th><th>Vector</th><th>Control</th></tr></thead>
+          <tbody>
+            <tr class="money"><td>Prompt injection → unauthorized refund</td><td>User message instructs the agent to refund</td><td>Eligibility + amount decided <strong>server-side from the order record</strong>, never from agent/user values. The agent <em>requests</em>; the payments service <em>authorizes</em>.</td></tr>
+            <tr class="money"><td>Over-refund / double-refund</td><td>Repeated or inflated refund call</td><td>Idempotency keys; server-side cap at original paid amount; one-refund-per-order-line invariant</td></tr>
+            <tr class="money"><td>Refund to ineligible order</td><td>Agent misreads policy</td><td>Eligibility check in payments service is the source of truth, independent of the agent's reasoning</td></tr>
+            <tr><td>Policy corpus poisoning</td><td>Tampered doc → wrong customer-facing policy</td><td>Corpus write access controlled + reviewed; treat the corpus as production config</td></tr>
+            <tr><td>PII leakage</td><td>Order/customer data in prompts and logs</td><td>Redact PII from logs; minimize PII in retrieved context; scoped per-conversation access</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout money">
+        <span class="k">The load-bearing principle</span>
+        <p>The agent is never the authority on whether or how much to refund. It proposes; a deterministic server-side check disposes. This makes prompt injection an <strong>annoyance rather than a financial incident.</strong></p>
+      </div>
+    </section>
+
+    <!-- 6 -->
+    <section id="s6">
+      <div class="sec-head"><span class="sec-num">§06</span><h2>Cost analysis</h2></div>
+      <div class="callout open">
+        <span class="k">Pricing flagged as illustrative</span>
+        <p>Verify against current published rates before quoting in a review. Figures used: Claude Sonnet ≈ $3 / M input, $15 / M output; Voyage embeddings ≈ $0.06 / M tokens. Order-of-magnitude, not committed numbers.</p>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Component</th><th>Volume / day</th><th>Unit (est.)</th><th>Daily (est.)</th><th>Monthly (est.)</th></tr></thead>
+          <tbody>
+            <tr><td>LLM inference</td><td>1,150 conv × ~15K in + ~2K out</td><td class="num">~$0.075 / conv</td><td class="num">≈ $86</td><td class="num"><strong>≈ $2,600</strong></td></tr>
+            <tr><td>Query embeddings</td><td>1,150 × ~200 tokens</td><td>negligible</td><td class="num">&lt; $0.10</td><td class="num">&lt; $5</td></tr>
+            <tr><td>Vector store</td><td>in-memory / pgvector</td><td>—</td><td class="num">$0 incremental</td><td class="num">$0</td></tr>
+            <tr><td>Payments</td><td>refund API</td><td>no per-refund fee</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>The honest cost story:</strong> at this scale inference is ~$2.6K/month — and that is <em>not</em> where cost concentrates. The real cost is <span class="danger">human escalation labour</span> (~460 escalations/day × handling time) and <span class="danger">refund risk</span> (one wrong autonomous refund can cost more than a month of inference, plus trust damage). Optimizing token cost here would be premature optimization of the cheap thing.</p>
+      <h4>Cost levers, in priority order — but most are premature</h4>
+      <ol>
+        <li><strong>Reduce escalation rate</strong> via better retrieval / containment — biggest real lever; attacks the dominant cost.</li>
+        <li><strong>Route simple classification to Haiku, reserve Sonnet for synthesis</strong> — would cut inference materially, but inference isn't the bottleneck, so this is a “later.”</li>
+        <li><strong>Cache embeddings for repeated queries</strong> — marginal at this volume.</li>
+      </ol>
+      <p>Do #1. Defer #2 and #3 until there's a reason.</p>
+    </section>
+
+    <!-- 7 -->
+    <section id="s7">
+      <div class="sec-head"><span class="sec-num">§07</span><h2>Monitoring &amp; observability</h2></div>
+      <h4>Business health</h4>
+      <p>Auto-resolution (containment) rate · escalation rate · refund volume &amp; value/day · CSAT on agent-handled conversations.</p>
+      <h4>System health</h4>
+      <p>Tool-call latency &amp; error rate · retrieval latency · LLM error / rate-limit rate · payments-API error rate.</p>
+      <h4>Correctness — the ones that matter most, and the hardest to measure</h4>
+      <ul>
+        <li>Retrieval-miss rate (queries below confidence floor)</li>
+        <li><span class="danger">Refund reconciliation lag</span> (INITIATED → CONFIRMED time; the Scenario-9 metric)</li>
+        <li><span class="danger">Stuck-refund count</span> (INITIATED beyond SLA → poller should have caught it)</li>
+        <li>Policy-contradiction flags raised</li>
+      </ul>
+      <div class="callout open">
+        <span class="k">Open question — unsolved, not hidden</span>
+        <p><strong>Hallucinated-policy-answer rate</strong> is genuinely hard to measure automatically. Candidate approach: sampled human review + an LLM-judge cross-check against retrieved chunks. Flagged as unsolved rather than pretending a dashboard covers it.</p>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <caption>Tiered alerts</caption>
+          <thead><tr><th>Alert</th><th>Threshold</th><th>Severity</th></tr></thead>
+          <tbody>
+            <tr class="money"><td>Refund volume spike (possible bug / fraud)</td><td>&gt; 3× baseline / hour</td><td class="sev p1">P1 — page</td></tr>
+            <tr class="money"><td>Refund stuck in INITIATED</td><td>&gt; 60s</td><td class="sev p1">P1 — page</td></tr>
+            <tr><td>Reconciliation lag rising</td><td>p95 &gt; 30s</td><td class="sev">P2</td></tr>
+            <tr><td>Retrieval-miss rate spike</td><td>&gt; 2× baseline</td><td class="sev">P2</td></tr>
+            <tr><td>LLM rate-limit errors</td><td>sustained &gt; 1%</td><td class="sev">P3</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Both P1s guard money. That's the right priority ordering for this system.</p>
+    </section>
+
+    <!-- 8 -->
+    <section id="s8">
+      <div class="sec-head"><span class="sec-num">§08</span><h2>Tools, products &amp; rationale</h2></div>
+      <p>Every choice shows alternatives, so each reads as a decision, not a recommendation.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Category</th><th>Chosen</th><th>Why</th><th>Alternatives</th></tr></thead>
+          <tbody>
+            <tr><td>Orchestration</td><td>Explicit Anthropic tool-use loop</td><td>Full visibility/control over every tool call; critical when blast radius is the top risk</td><td>LangGraph, CrewAI, LlamaIndex — more machinery, less transparency</td></tr>
+            <tr><td>Tool protocol</td><td>MCP</td><td>Clean tool boundary, reusable across hosts, decouples tools from orchestrator</td><td>Direct function calling; OpenAPI plugins</td></tr>
+            <tr><td>Embeddings</td><td>Voyage AI</td><td>Strong retrieval quality; already integrated</td><td>OpenAI text-embedding-3, Cohere, open bge / e5</td></tr>
+            <tr><td>Vector store</td><td>In-memory / pgvector</td><td>Corpus is tiny; no managed DB justified</td><td>Pinecone, Qdrant, Weaviate (10⁵–10⁶+ chunks only)</td></tr>
+            <tr><td>LLM</td><td>Claude Sonnet</td><td>Quality at acceptable cost for this volume</td><td>Haiku (cheaper, routing); Opus (overkill)</td></tr>
+            <tr class="money"><td>Payments</td><td>Razorpay</td><td>India-native, already integrated in the lab</td><td>Stripe (broader intl; less India-optimized)</td></tr>
+            <tr><td>Datastore</td><td>SQLite (lab) → Postgres</td><td>Postgres for prod; pgvector doubles as vector store</td><td>MySQL; managed RDS / Cloud SQL</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 9 -->
+    <section id="s9">
+      <div class="sec-head"><span class="sec-num">§09</span><h2>What this design deliberately does not do</h2></div>
+      <ul>
+        <li><strong>No horizontal scaling story.</strong> Proven unnecessary in §01. Adding it would solve an imaginary problem.</li>
+        <li><strong>No managed vector DB.</strong> Corpus size doesn't justify it.</li>
+        <li><strong>No multi-region / HA architecture.</strong> Out of scope at this scale; revisit at 20× volume.</li>
+        <li><strong>No fine-tuning.</strong> Retrieval + a good base model covers the requirement; fine-tuning would be premature.</li>
+      </ul>
+      <p>If the scale assumptions in §01 turn out 10–20× larger after validation, what changes is the human-escalation operating model and possibly the datastore — <em>not</em> the agent core. The agent core is <span class="danger">correctness-bound, not throughput-bound</span>, and that doesn't change with volume.</p>
+    </section>
+
+    <div class="endnote">
+      Demo 01 · Agentic RAG over MCP · ai-agent-demos — design review draft. Diagrams are Mermaid, version-controlled alongside the source. Pricing figures are illustrative and require verification against current published rates.
+    </div>
+
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+  (function(){
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (window.mermaid) {
+      mermaid.initialize({
+        startOnLoad:true,
+        theme:'base',
+        themeVariables:{
+          fontFamily:"'IBM Plex Mono', monospace",
+          fontSize:'14px',
+          primaryColor:'#f3f1ea',
+          primaryBorderColor:'#5b6472',
+          primaryTextColor:'#17191f',
+          lineColor:'#5b6472',
+          secondaryColor:'#fafaf7',
+          tertiaryColor:'#fafaf7',
+          noteBkgColor:'#fcefed',
+          noteBorderColor:'#b42318',
+          noteTextColor:'#7a160f',
+          actorBkg:'#f3f1ea',
+          actorBorder:'#5b6472',
+          actorTextColor:'#17191f'
+        }
+      });
+    }
+
+    // scroll-spy for the side rail
+    var links = Array.prototype.slice.call(document.querySelectorAll('.rail a'));
+    var map = {};
+    links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+    var secs = Array.prototype.slice.call(document.querySelectorAll('main section'));
+    if ('IntersectionObserver' in window && links.length){
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){
+          if(e.isIntersecting){
+            links.forEach(function(l){ l.classList.remove('active'); });
+            var a = map[e.target.id];
+            if(a) a.classList.add('active');
+          }
+        });
+      }, {rootMargin:'-20% 0px -70% 0px', threshold:0});
+      secs.forEach(function(s){ io.observe(s); });
+    }
+  })();
+</script>

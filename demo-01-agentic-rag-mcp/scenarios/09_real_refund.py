@@ -24,8 +24,8 @@ from _harness import log_header, log_text, run_scenario
 
 async def _wait_for_webhook(msg_index: int):
     if msg_index == 0:
-        log_text("system", "Waiting 1 second for webhook delivery…")
-        await asyncio.sleep(1)
+        log_text("system", "Waiting 10 second for webhook delivery…")
+        await asyncio.sleep(10)
 
 
 def main():
